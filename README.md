@@ -1,4 +1,4 @@
-# Battle Simulator (Z-media тестовое задание)
+# Battle Simulator
 
 Базовый симулятор сражений двух армий в стиле Army Clash. Платформа: **мобильная**.
 
