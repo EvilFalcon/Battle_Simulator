@@ -1,10 +1,11 @@
+using System;
 using BattleSim.Game;
 using BattleSim.Game.EventBus;
 using R3;
 
 namespace BattleSim.Mvp.GameUI
 {
-    public sealed class GameUIPresenter
+    public sealed class GameUIPresenter : IDisposable
     {
         private readonly IGameUIView _view;
         private readonly IBattleEventBus _eventBus;
@@ -35,6 +36,11 @@ namespace BattleSim.Mvp.GameUI
                 .Take(1)
                 .Subscribe(winner => _view.SetStatusText($"Team {winner + 1} wins!"))
                 .AddTo(_disposables);
+        }
+
+        public void Dispose()
+        {
+            _disposables?.Dispose();
         }
     }
 }

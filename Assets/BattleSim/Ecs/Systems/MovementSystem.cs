@@ -16,10 +16,6 @@ namespace BattleSim.Ecs.Systems
         private readonly IUnitViewRegistry _viewRegistry;
         private readonly IPathBlockChecker _pathBlockChecker;
         private readonly IPlayAreaBounds _playAreaBounds;
-        private readonly List<int> _livingEntityIds = new(64);
-        private readonly List<Vector3> _livingPositions = new(64);
-        private readonly List<float> _livingRadii = new(64);
-        private readonly List<Vector3> _separationVectors = new(64);
 
         public MovementSystem
         (
@@ -45,6 +41,11 @@ namespace BattleSim.Ecs.Systems
 
         public void Run(EcsWorld world, float deltaTime)
         {
+            using var _1 = UnityEngine.Pool.ListPool<int>.Get(out List<int> livingEntityIds);
+            using var _2 = UnityEngine.Pool.ListPool<Vector3>.Get(out List<Vector3> livingPositions);
+            using var _3 = UnityEngine.Pool.ListPool<float>.Get(out List<float> livingRadii);
+            using var _4 = UnityEngine.Pool.ListPool<Vector3>.Get(out List<Vector3> separationVectors);
+
             var unitPool = world.GetPool<UnitComponent>();
             var positionPool = world.GetPool<PositionComponent>();
             var targetPool = world.GetPool<TargetComponent>();
@@ -53,10 +54,6 @@ namespace BattleSim.Ecs.Systems
             var statePool = world.GetPool<UnitStateComponent>();
             var waypointPool = world.GetPool<WaypointComponent>();
             var tacticPool = world.GetPool<UnitTacticComponent>();
-
-            _livingEntityIds.Clear();
-            _livingPositions.Clear();
-            _livingRadii.Clear();
 
             foreach (var entityId in world.GetAllEntities())
             {
@@ -80,9 +77,9 @@ namespace BattleSim.Ecs.Systems
                     stateComponent.State = MovementState.Idle;
                     ApplyGroundAndBounds(ref positionComponent.Value);
                     SyncView(entityId, positionComponent.Value);
-                    _livingEntityIds.Add(entityId);
-                    _livingPositions.Add(positionComponent.Value);
-                    _livingRadii.Add(myRadius);
+                    livingEntityIds.Add(entityId);
+                    livingPositions.Add(positionComponent.Value);
+                    livingRadii.Add(myRadius);
                     
                     continue;
                 }
@@ -97,9 +94,9 @@ namespace BattleSim.Ecs.Systems
                     stateComponent.State = MovementState.InRange;
                     ApplyGroundAndBounds(ref positionComponent.Value);
                     SyncView(entityId, positionComponent.Value);
-                    _livingEntityIds.Add(entityId);
-                    _livingPositions.Add(positionComponent.Value);
-                    _livingRadii.Add(myRadius);
+                    livingEntityIds.Add(entityId);
+                    livingPositions.Add(positionComponent.Value);
+                    livingRadii.Add(myRadius);
                     
                     continue;
                 }
@@ -131,9 +128,9 @@ namespace BattleSim.Ecs.Systems
                     targetComponent.TargetEntityId = -1;
                     ApplyGroundAndBounds(ref positionComponent.Value);
                     SyncView(entityId, positionComponent.Value);
-                    _livingEntityIds.Add(entityId);
-                    _livingPositions.Add(positionComponent.Value);
-                    _livingRadii.Add(myRadius);
+                    livingEntityIds.Add(entityId);
+                    livingPositions.Add(positionComponent.Value);
+                    livingRadii.Add(myRadius);
                     
                     continue;
                 }
@@ -169,32 +166,30 @@ namespace BattleSim.Ecs.Systems
                 positionComponent.Value += directionToTarget * (statsComponent.Speed * deltaTime);
                 ApplyGroundAndBounds(ref positionComponent.Value);
                 SyncView(entityId, positionComponent.Value);
-                _livingEntityIds.Add(entityId);
-                _livingPositions.Add(positionComponent.Value);
-                _livingRadii.Add(myRadius);
+                livingEntityIds.Add(entityId);
+                livingPositions.Add(positionComponent.Value);
+                livingRadii.Add(myRadius);
             }
 
-            SeparationPass(positionPool);
-            _livingEntityIds.Clear();
-            _livingPositions.Clear();
-            _livingRadii.Clear();
+            SeparationPass(positionPool,livingEntityIds, livingPositions, livingRadii,separationVectors);
         }
 
-        private void SeparationPass(EcsWorld.EcsPool<PositionComponent> positionPool)
+        private void SeparationPass(EcsWorld.EcsPool<PositionComponent> positionPool, List<int> livingEntityIds, List<Vector3> livingPositions,
+            List<float> livingRadii, List<Vector3> separationVectors)
         {
-            var livingCount = _livingEntityIds.Count;
+            var livingCount = livingEntityIds.Count;
 
             if (livingCount == 0)
                 return;
 
-            _separationVectors.Clear();
+            separationVectors.Clear();
             for (var index = 0; index < livingCount; index++)
-                _separationVectors.Add(Vector3.zero);
+                separationVectors.Add(Vector3.zero);
 
             for (var index = 0; index < livingCount; index++)
             {
-                var unitPosition = _livingPositions[index];
-                var unitRadius = _livingRadii[index];
+                var unitPosition = livingPositions[index];
+                var unitRadius = livingRadii[index];
                 var separationVector = Vector3.zero;
 
                 for (var otherIndex = 0; otherIndex < livingCount; otherIndex++)
@@ -202,22 +197,22 @@ namespace BattleSim.Ecs.Systems
                     if (index == otherIndex)
                         continue;
 
-                    var otherUnitRadius = _livingRadii[otherIndex];
+                    var otherUnitRadius = livingRadii[otherIndex];
                     var minimumDistance = unitRadius + otherUnitRadius;
-                    var distanceBetween = Vector3.Distance(unitPosition, _livingPositions[otherIndex]);
+                    var distanceBetween = Vector3.Distance(unitPosition, livingPositions[otherIndex]);
 
                     if (distanceBetween < minimumDistance && distanceBetween > _combatSettings.MinimumDistanceEpsilon)
-                        separationVector += (unitPosition - _livingPositions[otherIndex]).normalized * (minimumDistance - distanceBetween);
+                        separationVector += (unitPosition - livingPositions[otherIndex]).normalized * (minimumDistance - distanceBetween);
                 }
 
-                _separationVectors[index] = separationVector;
+                separationVectors[index] = separationVector;
             }
 
             for (var index = 0; index < livingCount; index++)
             {
-                var entityId = _livingEntityIds[index];
+                var entityId = livingEntityIds[index];
                 ref var positionComponent = ref positionPool.Get(entityId);
-                var separation = _separationVectors[index];
+                var separation = separationVectors[index];
                 separation.y = 0f;
                 positionComponent.Value += separation;
                 ApplyGroundAndBounds(ref positionComponent.Value);
